@@ -1,0 +1,259 @@
+#! /bin/bash
+Licence="
+# +------------------------------------------------------------------------------------------------------------+
+# |
+# |This program is free software: you can redistribute it and/or modify
+# |it under the terms of the GNU General Public License as published by
+# |the Free Software Foundation, either version 3 of the License, or
+# |(at your option) any later version.
+# |
+# |This program is distributed in the hope that it will be useful,
+# |but WITHOUT ANY WARRANTY; without even the implied warranty of
+# |MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# |GNU General Public License for more details.
+# |
+# +------------------------------------------------------------------------------------------------------------+"
+mini_changelog="Nothing works for now, just playing with yad widgets..."
+git_address="https://github.com/Mermouy/inosync-gui"
+git_link="<a href=\"$git_address\">$git_address</a>"
+Summary="<b>Simple gui to sync directories with inosync &amp; yad</b>\n\nThe project is on github and should take long to upgrade as I'm not a real developper...\nIf you are developper, I will be happy to learn advices from you but, please do not give all answers without <i>child-level explanations</i>!\nIf you're a beginner as I am feel free to participate to this small project.\nPlease contact me if you need help like \"where to start\"\nGithub repo: $git_link\n"
+Author="MerMouY [mermouy [at] gmail .com]"
+Licence_link="<a href=\"http://www.gnu.org/licenses/gpl.html\">Gpl Official page</a>"
+Version="0.0.1"
+AppName="inosync-gui"
+yad=`which yad`
+Ino_dir="$HOME/.config/inosync-gui"
+install_path="/usr/local/bin"
+yadopt='--title=Inosync-gui --always-print-result --center --window-icon=view-refresh'
+AppName_error=gtk-help
+AppName_ok=gtk-ok
+Ino_conf_dir="$Ino_dir/conf.d"
+##
+
+#Fifo
+# PIPE=$(mktemp -u --tmpdir ${0##*/}.XXXXXXXX)
+# mkfifo $PIPE
+# exec 3<> $PIPE
+
+### FUNCTIONS
+
+# If yad not present what other choice do we have?
+function search_dialog()
+{
+    for i in `which kdialog zenity Xdialog dialog 2> /dev/null`
+    do
+        if [ -n $i ]
+        then
+            DIALOG=$i
+            return;
+        fi
+    done
+}
+
+# What sudo dialog to use
+function search_sudo()
+{
+for i in `which kdesu gksudo esudo 2> /dev/null`
+do
+	if [ -n $i ]
+		then
+		Sudo=$i
+		return;
+	else #TODO: use $DIALOG to read sudo password
+		message error "Error please install either kdesu, gksudo or esudo manually and restart the installer"
+		exit 1
+	fi
+done
+}
+
+function message()
+{
+if [ $# -gt 1 ]
+	then
+	case "$1" in
+		"error")
+			$DIALOG $yadopt --text="<span color=\"red\"><b>$2</b></span>"  --image="$AppName_error" --button=Quit $3
+		;;
+		"xerror")
+			$DIALOG $yadopt --text="<span color=\"red\"><b>$2</b></span>"  --image="$AppName_error" --button=Quit
+			exit 1
+		;;
+		"warning")
+			$DIALOG $yadopt --text="<b>$2</b>"  --image="$AppName\_warning" --button=Ok $3
+		;;
+		"*")
+		$DIALOG $yadopt --text="<span color=\"green\"><b>$1</b></span>" --image="$AppName_ok" --button=Ok $3
+		;;
+	esac
+else
+	$DIALOG --text="<span color=\"red\"><b>$1</b></span>" --image="$AppName_error" --button=Quit
+fi
+}
+
+# About & help dialog
+function about_ui()
+{
+echo -e "$Licence" | $DIALOG $yadopt --text-info --width=500 --height=650 --image="gtk-help" \
+--text="<b>$AppName</b>\n\nVersion $Version is slowly and poorly developped by <b>$Author</b>\n\n$Summary\n\n<b>Mini changelog:\n\n<span color=\"green\"><tt>$mini_changelog</tt></span>\n\nFollow or participe on this small project at:\n$git_link\n\nLicence:</b>" \
+--button=Quit:1 --image-on-top
+}
+
+function install_it()
+{
+Act_dir=`pwd`
+#Sudo verification
+if [ -z `which gksudo` ]
+	then
+	search_sudo
+else Sudo=`which gksudo`
+fi
+exe_list=`ls -F | grep '*'`
+cd /tmp || message error "Unable to <tt>cd /tmp</tt>"
+git clone $git_address $AppName || message error "Unable to clone repo:\n$git_link" && exit 0
+cd $AppName
+for f in "$0"
+	do
+	$Sudo "cp -v $Act_dir/$f $install_path/$f" || message xerror "Unable to :\n<tt><span color=\"black\">cp $Act_dir/$f</span></tt> to <tt><span color=\"black\">$install_path/$f</span></tt>"
+done
+mkdir -pv $Ino_conf_dir
+cat > $Ino_conf_dir/MyFirstSync.desktop << EOF
+[Desktop Entry]
+Version=0.1
+Encoding=UTF-8
+Name=My first sync
+Comment=Just an example of Synchronization, you can safely delete
+Exec=inosync-gui --about
+StartupNotify=true
+Terminal=false
+Icon=view-refresh
+EOF
+echo -e "
+## Edit to your needs:
+inosync=\"/usr/local/bin/inosync.py\"
+rsync=`which rsync`
+Sudo=\"$Sudo\"
+Ino_dir="$Ino_dir"
+install_path="$install_path"
+yadopt='--title=Inosync-gui --always-print-result --center --window-icon=view-refresh'
+" > $Ino_dir/$AppName.conf
+cd $Act_dir
+}
+
+function CreateConf()
+{
+IFS='|'
+while [ "${UserConf[0]}" = "MySync" ] ||  [ "${UserConf[1]}" = "/path/to/dir" ] ||  [ "${UserConf[2]}" = "/path/to/dir" ] ||  [ -z "${UserConf[0]}" ] ||  [ ! -f "${UserConf[4]}" ]
+do
+	UserConf=($($DIALOG $yadopt --form --text="<b>Edit your Synchronized Folders: </b>" \
+--field="Name of this Synchronization: <sub>*</sub>" 'MySync' \
+--field="Folder to watch and Sync from: <sub>*</sub>":dir "/path/to/dir" \
+--field="Folder to sync to (Node): <sub>*</sub>":dir 'path/to/dir' \
+--field="Description you may need: " 'Your tiny description' \
+--field="An icon may also help: ":fl '/usr/share/icons/gnome/' \
+--field="Simulate?":CHK 'FALSE'))
+done
+if [ "`file -b --mime-type \"${UserConf[4]}\"`" = "image/jpeg" ] ||  [ "`file -b --mime-type \"${UserConf[4]}\"`" = "image/png" ]
+	then
+    message warning "Icon must be an image using default icon..."
+    UserConf[4]="gtk-help"
+fi
+NAME="${UserConf[1]}"
+if ${UserConf[5]}
+	then
+	$Inoptions='--norsync'
+fi
+echo -e "wpaths = [\"${UserConf[1]}\"]
+#rexcludes = [
+#       \"/localhost\",
+# ]
+rpaths = [\"${UserConf[1]}\"]
+rnodes = [
+      \"${UserConf[2]}\",
+]
+#extra = \"--rsh=ssh -a\"
+#rspeed = 0
+#emask = [
+#     \"IN_CLOSE_WRITE\",
+#     \"IN_CREATE\",
+#     \"IN_DELETE\",
+#     \"IN_MOVED_FROM\",
+#     \"IN_MOVED_TO\",
+#]
+#edelay = 10
+rsync = \"$rsync\"
+Inoptions = \"$Inoptions\"
+SyncIcon = \"${UserConf[4]}\"
+SyncDescription = \"${UserConf[3]}\"
+" > $Ino_conf_dir/$NAME.conf
+echo -e "[Desktop Entry]
+Version=$Version
+Encoding=UTF-8
+Name=$NAME
+Comment=${UserConf[3]}
+Exec=$inosync -c $Ino_conf_dir/$NAME.conf
+StartupNotify=true
+Terminal=false
+Icon=${UserConf[4]}
+"  > $Ino_conf_dir/$NAME.desktop
+}
+
+function EditConf()
+{
+echo prout
+}
+
+function Sync()
+{
+echo prout
+}
+
+function Main_ui()
+{
+while [ -z `ls $Ino_conf_dir/*.desktop` ]
+	do install_it
+done
+$DIALOG $yadopt --icons --read-dir="$Ino_conf_dir" --sort-by-name --item-width=128 --button-layout=spread --button=Quit:252 --button=Add:0
+case $? in
+	252) message error "Cancelled by user"
+		exit 1
+	;;
+	0) bash $0 --add
+		bash $0
+	;;
+esac
+}
+
+# Dialog Verifications
+if [ -z "$yad" ]
+	then
+	search_dialog
+	if [ -z $DIALOG ]
+		then
+    	echo -e "No dialog command found.\nPlease install kdialog, zenity, xdialog or dialog for a better interface."
+	else message "The yad dialog is not present.\n$AppName should be soon adapted to $Dalog."
+	exit 0
+	fi
+else DIALOG="$yad"
+fi
+if [ -f $Ino_dir/$AppName.conf ]
+	then
+	source $Ino_dir/$AppName.conf
+else
+	install_it
+fi
+
+# Command Arguments
+case "$1" in
+	"") Main_ui
+		exit 0
+		;;
+	"--edit") EditConf "$2"
+		exit 0
+		;;
+	"--add") CreateConf
+		exit 0
+		;;
+	"--about") about_ui
+		exit 0
+		;;
+esac
