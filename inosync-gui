@@ -24,10 +24,11 @@ AppName="inosync-gui"
 yad=`which yad`
 Ino_dir="$HOME/.config/inosync-gui"
 install_path="/usr/local/bin"
-yadopt='--title=Inosync-gui --always-print-result --center --window-icon=view-refresh'
+yadopt="--title=Inosync-gui --always-print-result --center --window-icon=view-refresh"
 AppName_error=gtk-help
 AppName_ok=gtk-ok
 Ino_conf_dir="$Ino_dir/conf.d"
+alias ls=`which ls`
 ##
 
 #Fifo
@@ -82,7 +83,7 @@ if [ $# -gt 1 ]
 			$DIALOG $yadopt --text="<b>$2</b>"  --image="$AppName\_warning" --button=Ok $3
 		;;
 		"*")
-		$DIALOG $yadopt --text="<span color=\"green\"><b>$1</b></span>" --image="$AppName_ok" --button=Ok $3
+		$DIALOG $yadopt --text="<span color=\"green\"><b>$1</b></span>" --image="$AppName_ok" --button=Ok
 		;;
 	esac
 else
@@ -102,18 +103,24 @@ function install_it()
 {
 Act_dir=`pwd`
 #Sudo verification
-if [ -z `which gksudo` ]
+if [ -z `which kdesu` ]
 	then
 	search_sudo
-else Sudo=`which gksudo`
+else Sudo=`which kdesu`
 fi
+# cd /usr/local/src
+cd /usr/local/src || message xerror "Unable to <tt>cd /usr/local/src</tt>\n\nExiting..."
+# remove existing clone TODO git pull
+$Sudo rm -rf $AppName 2>/dev/null
+#Clone repo
+$Sudo git clone $git_address $AppName || message xerror "Unable to clone repo:\n$git_link\n\nExiting.."
+cd $AppName || message xerror "Unable to cd $AppName\n\nExiting.."
+#List executables & copy them to $install_path
 exe_list=`ls -F | grep '*'`
-cd /tmp || message error "Unable to <tt>cd /tmp</tt>"
-git clone $git_address $AppName || message error "Unable to clone repo:\n$git_link" && exit 0
-cd $AppName
-for f in "$0"
+for f in "$exe_list"
 	do
-	$Sudo "cp -v $Act_dir/$f $install_path/$f" || message xerror "Unable to :\n<tt><span color=\"black\">cp $Act_dir/$f</span></tt> to <tt><span color=\"black\">$install_path/$f</span></tt>"
+	$Sudo rm -f $install_path/$f
+	$Sudo ln -s `pwd`/$f $install_path/$f || message xerror "Unable to :\n<tt><span color=\"black\">link `pwd`/$f</span></tt> to <tt><span color=\"black\">$install_path/$f</span></tt>"
 done
 mkdir -pv $Ino_conf_dir
 cat > $Ino_conf_dir/MyFirstSync.desktop << EOF
@@ -122,7 +129,7 @@ Version=0.1
 Encoding=UTF-8
 Name=My first sync
 Comment=Just an example of Synchronization, you can safely delete
-Exec=inosync-gui --about
+Exec=inosync-tray --about
 StartupNotify=true
 Terminal=false
 Icon=view-refresh
@@ -141,23 +148,31 @@ cd $Act_dir
 
 function CreateConf()
 {
-IFS='|'
-while [ "${UserConf[0]}" = "MySync" ] ||  [ "${UserConf[1]}" = "/path/to/dir" ] ||  [ "${UserConf[2]}" = "/path/to/dir" ] ||  [ -z "${UserConf[0]}" ] ||  [ ! -f "${UserConf[4]}" ]
+while  [ -z "${UserConf[0]}" ] || [ "${UserConf[0]}" = "MySync" ] ||  [ "${UserConf[1]}" = "/" ] ||  [ "${UserConf[2]}" = "/" ] || [ "${UserConf[3]}" = "Your tiny description" ] || [ ! -f "${UserConf[4]}" ]
 do
+oIFS=$IFS
+IFS="|"
 	UserConf=($($DIALOG $yadopt --form --text="<b>Edit your Synchronized Folders: </b>" \
 --field="Name of this Synchronization: <sub>*</sub>" 'MySync' \
---field="Folder to watch and Sync from: <sub>*</sub>":dir "/path/to/dir" \
---field="Folder to sync to (Node): <sub>*</sub>":dir 'path/to/dir' \
+--field="Folder to watch and Sync from: <sub>*</sub>":dir "/" \
+--field="Folder to sync to (Node): <sub>*</sub>":dir '/' \
 --field="Description you may need: " 'Your tiny description' \
 --field="An icon may also help: ":fl '/usr/share/icons/gnome/' \
 --field="Simulate?":CHK 'FALSE'))
+	case $? in
+	252) message xerror "Cancelled by user"
+	;;
+	1) Main_ui
+		exit 0
+	;;
+	esac
 done
-if [ "`file -b --mime-type \"${UserConf[4]}\"`" = "image/jpeg" ] ||  [ "`file -b --mime-type \"${UserConf[4]}\"`" = "image/png" ]
+if [ "`file -b --mime-type \"${UserConf[4]}\"`" ! = "image/jpeg" ] && [ "`file -b --mime-type \"${UserConf[4]}\"`" ! = "image/png" ]
 	then
     message warning "Icon must be an image using default icon..."
     UserConf[4]="gtk-help"
 fi
-NAME="${UserConf[1]}"
+NAME="${UserConf[0]}"
 if ${UserConf[5]}
 	then
 	$Inoptions='--norsync'
@@ -190,7 +205,7 @@ Version=$Version
 Encoding=UTF-8
 Name=$NAME
 Comment=${UserConf[3]}
-Exec=$inosync -c $Ino_conf_dir/$NAME.conf
+Exec=inosync-tray $Ino_conf_dir/$NAME.conf
 StartupNotify=true
 Terminal=false
 Icon=${UserConf[4]}
@@ -207,23 +222,29 @@ function Sync()
 echo prout
 }
 
+function edit_ui()
+{
+echo prout
+}
+
 function Main_ui()
 {
-while [ -z `ls $Ino_conf_dir/*.desktop` ]
-	do install_it
-done
-$DIALOG $yadopt --icons --read-dir="$Ino_conf_dir" --sort-by-name --item-width=128 --button-layout=spread --button=Quit:252 --button=Add:0
+$DIALOG $yadopt --icons --width=800 --height=600 \
+--read-dir="$Ino_conf_dir" --sort-by-name --item-width=128 \
+--buttons-layout=spread --button=Quit:1 --button="Remove/Edit":2 --button=Add:0
 case $? in
-	252) message error "Cancelled by user"
-		exit 1
+	252|1) exit 0
 	;;
-	0) bash $0 --add
-		bash $0
+	0) CreateConf
+	;;
+	2) edit_ui
 	;;
 esac
 }
 
 # Dialog Verifications
+function verify()
+{
 if [ -z "$yad" ]
 	then
 	search_dialog
@@ -241,19 +262,27 @@ if [ -f $Ino_dir/$AppName.conf ]
 else
 	install_it
 fi
+}
 
-# Command Arguments
+# Command Arguments if empty send main ui
+# if [ -z "$@" ]
+# 	then
+# 	verify && Main_ui
+# fi
+# Else listen first Argument
 case "$1" in
-	"") Main_ui
+	"--update") verify && install_it
 		exit 0
 		;;
-	"--edit") EditConf "$2"
+	"") verify && Main_ui
 		exit 0
 		;;
-	"--add") CreateConf
+	"--edit") if [ -n "$2" ]; then verify && edit_ui "$2"; else verify && about_ui ; fi
+		;;
+	"--add") verify && CreateConf
 		exit 0
 		;;
-	"--about") about_ui
+	*) verify && about_ui
 		exit 0
 		;;
 esac
