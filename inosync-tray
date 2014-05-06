@@ -1,0 +1,84 @@
+#! /bin/bash
+licence="
+# +------------------------------------------------------------------------------------------------------------+
+# |
+# |This program is free software: you can redistribute it and/or modify
+# |it under the terms of the GNU General Public License as published by
+# |the Free Software Foundation, either version 3 of the License, or
+# |(at your option) any later version.
+# |
+# |This program is distributed in the hope that it will be useful,
+# |but WITHOUT ANY WARRANTY; without even the implied warranty of
+# |MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# |GNU General Public License for more details.
+# |
+# +------------------------------------------------------------------------------------------------------------+"
+author="MerMouY"
+author_mail="mermouy [at] gmail .com"
+args="${1}"
+ino_dir="$HOME/.config/inosync-gui"
+ino_icons_dir="${ino_dir}/icons"
+
+# create a FIFO file, used to manage the I/O redirection from shell
+mypipe=$(mktemp -u --tmpdir ${0##*/}.XXXXXXXX)
+mkfifo ${mypipe}
+
+# attach a file descriptor to the file
+exec 3<> ${mypipe}
+
+# add handler to manage process shutdown
+on_exit() {
+    echo "quit" >&3
+    rm -f ${mypipe}
+}
+trap on_exit EXIT
+
+# add handler for tray icon left click
+on_click() {
+    inosync-gui
+}
+export -f on_click
+
+# Must have an argument
+if [ -z "${args}" ]; then exit 0; fi
+
+update_state()
+{
+menu=
+	for d in ${actives_sync}; do
+		menu="Start ${d##*/}!python inosync.py -c ${d}|${menu}"
+	done
+if [[ -z "${menu}" ]]; then
+	echo "visible:false" >&3
+else
+	echo "visible:true" >&3
+	echo "menu:${menu}_basic|${menu}"
+	read
+	echo "menu:${menu}_basic|${menu}" >&3
+fi
+}
+
+desk_file=$(echo "${args} " | sed 's/.conf /.desktop/')
+conf_file=$(echo "${args} " | sed 's/.conf /.conf/')
+pid_list=$(ps -aux | grep -i "python inosync.py -c ${conf_file}" | grep -v "grep" | cut -d " " -f3)
+proc_list=$(ps -aux | grep -i "python inosync.py -c ${d}" | cut -d "-" -f6-9 | sed 's/c //')
+proc_list_en=($(echo ${proc_list}))
+echo ${proc_list_en[@]}
+echo ${proc_list_en[*]}
+read
+menu_basic='Start/Stop all enable Sync!for sync in ${actives_sync}; do python inosync.py -c ${sync}; done"!view-refresh|Shutdown all Sync and exit!for proc in ${pid_list};do kill ${proc} 2>/dev/null;done && exit 0"!gtk-close'
+name=$(cat ${desk_file} | grep Name= | sed 's/Name=//')
+Icon=$(cat ${desk_file} | grep Icon= | sed 's/Icon=//;s/.png/_16.png/')
+# FIXME: >&3
+	menu_add=$(echo "Start ${name}!python inosync.py -c ${args} && echo \"Stop ${name}\"!killall "python"!gtk-open"|)
+# 	echo "menu:${menu_add}${menu}_basic" >&3
+# 	notify-send -a inosync -i "${ino_icons_dir}/inosync-gui_256.png" "Sync ${name} Added to tray!" "\nright click and \"enable\" to start synchronization."
+# create the notification icon
+	${yad} --notification \
+	--listen \
+	--menu="${menu}_basic" \
+    --image="gtk-help" \
+    --text="Notification tooltip" \
+    --command="bash -c on_click" <&3
+
+update_state && notify-send -a inosync -i "${ino_icons_dir}/inosync-gui_256.png" "Sync ${name} Added to tray!" "\nright click and \"enable\" to start synchronization."
