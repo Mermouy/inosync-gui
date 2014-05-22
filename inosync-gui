@@ -29,6 +29,8 @@ app_name_error="gtk-help"
 app_name_ok="gtk-ok"
 ino_conf_dir="${ino_dir}/conf.d"
 ino_icons_dir="${ino_dir}/icons"
+tmp="/tmp/inosync-gui"
+
 #All aliases for core-utils as they are often updated by user/distrib profile?
 alias ls=$(which ls)
 ##
@@ -246,27 +248,46 @@ echo "prout"
 
 Edit_ui()
 {
+#Get actives synchronistaions
+if [[ ! -f ${tmp}/.activ_list ]];then
+	for d in ${ino_conf_dir}/*.conf;do
+		grep 'SyncEnable="true"' "${d}" >/dev/null && echo "$d" >> ${tmp}/.activ_list
+	done
+fi
 # Retrieve list of configured syncs
-sync_List=$(for f in $(ls -AL ~/.config/inosync-gui/conf.d/*.desktop) ; do echo "$(basename  ${f} .desktop)"; grep -m 1 -is 'Icon=' ${f} | sed 's/Icon=//'; grep -m 1 -is 'Icon=' ${f} | sed 's/Icon=//';echo "${f}"; done)
+sync_List=$(for f in ~/.config/inosync-gui/conf.d/*.desktop ; do \
+	echo "$(basename  ${f} .desktop)"
+	grep -m 1 -is 'Icon=' ${f} | sed 's/Icon=//'
+	grep -m 1 -is 'Icon=' ${f} | sed 's/Icon=//'
+	echo "${f}"
+	grep 'SyncEnable="true"' ${ino_conf_dir}/$(basename  ${f} .desktop).conf >>/dev/null && echo "gtk-ok" || echo "gtk-cancel"; done)
 # Dialog to them
 file2edit=$(echo "${sync_List}" | ${DIALOG} ${yadopt} --list --width=800 --height=450 \
 --text="<big><b>Select synchronisation config to edit/remove: </b></big>\nDouble click to edit file." \
---column="Name: " --column="Icon: ":img --column="Icon_path":hd --column="File: " \
+--column="Name: " --column="Icon: ":img --column="Icon_path":hd --column="File: " --column="Enable: ":img \
 --button='Remove!gtk-remove!Remove selected Sync':2 \
 --button='Modify!gtk-edit!Modify selected Sync':0 \
+--button='Add!gtk-add!Add a new synchronization':3 \
+--button='Run!gtk-exec!Run selected synchronization':4 \
 --button='Cancel!gtk-cancel!Cancel and go back to main menu':1 \
 --image=icons/inosync-gui_128.png --buttons-layout=spread --separator=" ")
 case $? in
-	2) Rm_User_Conf "${file2edit}" ;;
-	0) Edit_User_Conf "${file2edit}" ;;
-	*) return 0 ;;
+	4) run_conf ${file2edit} ; shift;;
+	3) CreateConf ;;
+	2) Rm_User_Conf ${file2edit}; ./$0 ;;
+	0) Edit_User_Conf ${file2edit} ;;
+	*) exit 0;;
 esac
+}
+
+run_conf() {
+	file2edit="$3"
+	`grep '^Exec' ${file2edit}	 | tail -1 | sed 's/^Exec=//' | sed 's/%.//'` &
 }
 
 parse_conf() {
 conf_file="${1}"
 sed 's/ //g' "${conf_file}" > "${temp_file}"
-
 }
 
 Edit_User_Conf() {
@@ -297,44 +318,46 @@ UserConf=($(${DIALOG} --title=Inosync-gui --always-print-result --center --windo
 IFS="${oIFS}"
 if [ -n "${UserConf[0]}" ]; then export UserConf && CreateConf; fi
 }
+export -f Edit_User_Conf
 
 Rm_User_Conf() {
-file2rm="${1}"
-if [ -n "${file2rm}" ]; then file3rm=$(echo "${file2rm}" | sed 's/.desktop/.conf/')
-	name$(basename ${file2rm} .desktop)
-	icon2rm=$(echo "${ino_icons_dir}/${name}.png")
+file2rm="${3}"
+if [ -n "${file2rm}" ]; then name=$(basename ${file2rm} .desktop)
+	file3rm="${ino_conf_dir}/${name}.conf"
+	icon2rm="${ino_icons_dir}/${name}.png"
 	${DIALOG} ${yadopt} --image=gtk-dialog-question --width=700 \
-	--text="<b>Do you really want to delete:\n\n<tt>${file2rm}\n${file3rm}\n</tt>And\n<tt>${icon2rm}</tt>?</b>"
+	--text="<b>Do you really want to delete:\n\n<tt>${name}.desktop\n${name}.conf\n</tt>And\n<tt>${name}.png</tt>?</b>"
 	case $? in
 		1|252)  return 1 ;;
-		*) rm -f {${file2rm},${file3rm},${icon2rm}} ;;
+		*) rm -f {${file2rm},${file3rm},${icon2rm}}
+			return 0;;
 	esac
+else return 1
 fi
 }
 
-main_ui()
-{
-while : ; do
-choice=$(${DIALOG} ${yadopt} --icons --width=750 --height=350 \
---read-dir="${ino_conf_dir}" --sort-by-name --item-width=128 \
---text="<b><big>Double-click on icon to run the configured Sync.</big></b>
-
-You can also use buttons below to <i>add</i> or <i>edit</i>, remove configurations." \
---buttons-layout=spread --button="Remove/Edit!gtk-edit!Remove or modify configured Sync":2 \
---button="Add Sync!gtk-add!Add a new Sync configuration":0 \
---button="Quit!gtk-close!Close $0":1 \
---image=icons/inosync-gui_128.png)
-	case $? in
-		252|1) exit 0
-		;;
-		0) CreateConf
-		;;
-		2) Edit_ui
-		;;
-	esac
-done
-}
-export -f main_ui
+#
+# main_ui()
+# {
+# choice=$(${DIALOG} ${yadopt} --icons --width=750 --height=350 \
+# --read-dir="${ino_conf_dir}" --sort-by-name --item-width=128 \
+# --text="<b><big>Double-click on icon to run the configured Sync.</big></b>\n\n \
+# You can also use buttons below to <i>add</i> or <i>edit</i>, remove configurations." \
+# --buttons-layout=spread \
+# --button="Remove/Edit!gtk-edit!Remove or modify configured Sync":2 \
+# --button="Add Sync!gtk-add!Add a new Sync configuration":0 \
+# --button="Quit!gtk-close!Close $0":1 \
+# --image=icons/inosync-gui_128.png)
+# 	case $? in
+# 		252|1) exit 0
+# 		;;
+# 		0) CreateConf
+# 		;;
+# 		2) Edit_ui
+# 		;;
+# 	esac
+# }
+# export -f main_ui
 
 # Dialog Verifications
 verify()
@@ -357,21 +380,19 @@ fi
 
 main()
 {
-case "${1}" in
+case ${1} in
 	"--update") install_it
 		exit 0
-		;;
-	"") main_ui
-		exit 0
-		;;
-	"--edit") if [ -n "${2}" ]; then edit_ui "${2}"; else about_ui ; fi
 		;;
 	"--add") CreateConf
 		exit 0
 		;;
-	*) about_ui
+	"--about") about_ui
 		exit 0
 		;;
+	"") Edit_ui
+ 		exit 0
+ 		;;
 esac
 }
 

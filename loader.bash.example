@@ -1,0 +1,18 @@
+. loader.sh
+> source ./loader.bash
+> source /usr/share/shellscript-loader/loader.zsh
+
+> loader_flag start.sh
+> loader_flag "${BASH_SOURCE[0]}"
+
+> loader_addpath source
+> loader_addpath /usr/share/scripts/sh
+
+> load main.sh
+> load some/reloadable.sh
+> include commands.sh
+> include utils/parawrap.sh
+> call checkconnection.sh && connected=true
+> call tools/strip.sh a.txt b.txt
+
+> loader_finish

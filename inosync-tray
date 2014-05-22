@@ -15,10 +15,15 @@ licence="
 # +------------------------------------------------------------------------------------------------------------+"
 author="MerMouY"
 author_mail="mermouy [at] gmail .com"
-args="${1}"
+args="$@"
 ino_dir="$HOME/.config/inosync-gui"
+ino_conf_dir="${ino_dir}/conf"
 ino_icons_dir="${ino_dir}/icons"
-
+appname="$0"
+tmp="/tmp/inosync-tray"
+if [[ ! -d ${tmp} ]]; then
+	mkdir ${tmp} || echo "Error initializing temp dir" && sleep 3 && exit 1
+fi
 # create a FIFO file, used to manage the I/O redirection from shell
 mypipe=$(mktemp -u --tmpdir ${0##*/}.XXXXXXXX)
 mkfifo ${mypipe}
@@ -35,50 +40,92 @@ trap on_exit EXIT
 
 # add handler for tray icon left click
 on_click() {
-    inosync-gui
+    exit 0
 }
 export -f on_click
 
-# Must have an argument
-if [ -z "${args}" ]; then exit 0; fi
+inosync() {
+python /usr/local/bin/inosync.py -c "$1"
+}
 
-update_state()
-{
-menu=
-	for d in ${actives_sync}; do
-		menu="Start ${d##*/}!python inosync.py -c ${d}|${menu}"
-	done
-if [[ -z "${menu}" ]]; then
-	echo "visible:false" >&3
-else
-	echo "visible:true" >&3
-	echo "menu:${menu}_basic|${menu}"
-	read
-	echo "menu:${menu}_basic|${menu}" >&3
+#Get actives synchronistaions
+actives_sync() {
+for d in ${ino_conf_dir}/*.conf;do
+	grep 'SyncEnable="true"' "${d}" >/dev/null && echo "$d" >> ${tmp}/.activ_list
+done
+}
+
+update_state(){
+echo prout
+}
+
+start_all() {
+actives_sync || message xerror "No conf found"
+for d in $(cat ${tmp}/.activ_list); do
+	inosync -c ${d} &syncpid=$!
+	echo "${syncpid}">> ${tmp}/.pid_list
+done
+}
+
+kill_all() {
+for pid in $(cat ${tmp}/.pid_list 2>/dev/null);do
+	kill "${pid}"
+# TODO: remove this
+	echo "killed ${pid}" >> /tmp/killed
+done
+rm -rf ${tmp}
+}
+export -f kill_all
+
+kill_and_exit() {
+kill_all
+exit 0
+}
+export -f kill_and_exit
+
+start_icon() {
+yad --notification \
+	--listen \
+	--menu="${menu_basic}" \
+    --image-path="${ino_icons_dir}" --image="inosync-gui_32" \
+    --text="Manage your synchronisations" \
+    --command="bash -c on_click" <&3
+}
+export -f start_icon
+
+# Verify icon exist
+verify_pid() {
+if [[ -z "$INO_TRAY_PID" ]]; then
+	return 0
+else return 1
 fi
 }
 
-desk_file=$(echo "${args} " | sed 's/.conf /.desktop/')
-conf_file=$(echo "${args} " | sed 's/.conf /.conf/')
-pid_list=$(ps -aux | grep -i "python inosync.py -c ${conf_file}" | grep -v "grep" | cut -d " " -f3)
-proc_list=$(ps -aux | grep -i "python inosync.py -c ${d}" | cut -d "-" -f6-9 | sed 's/c //')
-proc_list_en=($(echo ${proc_list}))
-echo ${proc_list_en[@]}
-echo ${proc_list_en[*]}
-read
-menu_basic='Start/Stop all enable Sync!for sync in ${actives_sync}; do python inosync.py -c ${sync}; done"!view-refresh|Shutdown all Sync and exit!for proc in ${pid_list};do kill ${proc} 2>/dev/null;done && exit 0"!gtk-close'
-name=$(cat ${desk_file} | grep Name= | sed 's/Name=//')
-Icon=$(cat ${desk_file} | grep Icon= | sed 's/Icon=//;s/.png/_16.png/')
-# FIXME: >&3
-	menu_add=$(echo "Start ${name}!python inosync.py -c ${args} && echo \"Stop ${name}\"!killall "python"!gtk-open"|)
-# 	echo "menu:${menu_add}${menu}_basic" >&3
-# 	notify-send -a inosync -i "${ino_icons_dir}/inosync-gui_256.png" "Sync ${name} Added to tray!" "\nright click and \"enable\" to start synchronization."
-# create the notification icon
-	${yad} --notification \
-	--listen \
-	--menu="${menu}_basic" \
-    --image="gtk-help" \
-    --text="Notification tooltip" \
-    --command="bash -c on_click" <&3
+actives_sync
+if [[ -f ${tmp}/.pid_list ]] && [[ -f ${tmp}/.activ_list ]];then
+	menu_basic="Edit Sync Configuration!./inosync-gui --edit!gtk-edit|Start all enable Sync (listed below)!bash -c start_all!view-refresh|Shutdown all enable Sync!bash -c kill_all!gtk-close|Shutdown all enable Sync and exit!bash -c kill_and_exit!gtk-quit"
+elif [[ ! -f ${tmp}/.pid_list ]] && [[ -f ${tmp}/.activ_list ]];then
+	menu_basic="Edit Sync Configuration!./inosync-gui --edit!gtk-edit|Start all enable Sync (listed below)!bash -c start_all!view-refresh|Shutdown all enable Sync and exit!bash -c kill_and_exit!gtk-quit"
+elif [[ -f ${tmp}/.pid_list ]] && [[ ! -f ${tmp}/.activ_list ]];then
+	menu_basic="Edit Sync Configuration!./inosync-gui --edit!gtk-edit|Shutdown all enable Sync!bash -c kill_all!gtk-close|Shutdown all enable Sync and exit!bash -c kill_and_exit!gtk-quit"
+elif [[ ! -f ${tmp}/.pid_list ]] && [[ ! -f ${tmp}/.activ_list ]];then
+	menu_basic="Edit Sync Configuration!./inosync-gui --edit!gtk-edit|Shutdown all enable Sync and exit!bash -c kill_and_exit!gtk-quit"
+fi
 
-update_state && notify-send -a inosync -i "${ino_icons_dir}/inosync-gui_256.png" "Sync ${name} Added to tray!" "\nright click and \"enable\" to start synchronization."
+# Verify args
+if [ -z "${args}" ]; then
+	verify_pid && start_icon
+else
+		a=0
+		for arg in "${args}";do
+			let a=$a+1
+			desk_file=$(echo "${args} " | sed 's/.conf /.desktop/')
+			name=$(cat ${desk_file} | grep Name= | sed 's/Name=//')
+			icon=$(cat ${desk_file} | grep Icon= | sed 's/Icon=//;s/.png/_16.png/')
+			menu_add=$(echo "menu:${menu_basic}|${name}!bash -c inosync ${args}!$icon")
+			verify_pid && start_icon &
+			printf "${menu_add}" >&3
+			added_list[$a]="${name}"
+		done
+		notify-send -a Inosync-gui -i "${ino_icons_dir}"/inosync-gui_64.png -t 3000 "${#added_list[@]} Configuration(s) added" "to enable sync list, use right click on icon to start synchronization."
+fi
